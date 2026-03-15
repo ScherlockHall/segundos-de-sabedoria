@@ -1385,7 +1385,15 @@ function updateProfile() {
   } else if (state.user?.provider === 'google' || state.user?.provider === 'facebook') {
     initialsEl.style.display = '';
     initialsEl.textContent = name[0].toUpperCase();
-    if (hint) hint.textContent = 'Foto da sua conta ' + (state.user.provider === 'google' ? 'Google' : 'Facebook') + ' será usada após login real';
+    // Google photos são públicas; Facebook URLs expiram — usa inicial para Facebook
+    if (state.user.provider === 'google' && state.user?.photoURL) {
+      initialsEl.style.display = 'none';
+      let img = avatarEl.querySelector('img');
+      if (!img) { img = document.createElement('img'); avatarEl.insertBefore(img, avatarEl.firstChild); }
+      img.src = state.user.photoURL;
+      img.onerror = () => { initialsEl.style.display = ''; if (img.parentNode) img.remove(); };
+    }
+    if (hint) hint.textContent = 'Conectado via ' + (state.user.provider === 'google' ? 'Google' : 'Facebook');
   } else {
     initialsEl.style.display = '';
     initialsEl.textContent = name === 'Visitante' ? 'V' : name[0].toUpperCase();
