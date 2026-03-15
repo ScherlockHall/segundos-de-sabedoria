@@ -254,6 +254,47 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* Transitions */
 .nav-transition{animation:fadeIn .25s ease}
 </style>
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-analytics.js";
+import {
+  getAuth, GoogleAuthProvider, FacebookAuthProvider,
+  signInWithPopup, signInAnonymously, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+import {
+  getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-messaging.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCoPbh6QP8olqA77HEdnVAt6JGfff2cnHg",
+  authDomain: "segundos-de-sabedoria.firebaseapp.com",
+  projectId: "segundos-de-sabedoria",
+  storageBucket: "segundos-de-sabedoria.firebasestorage.app",
+  messagingSenderId: "808843843743",
+  appId: "1:808843843743:web:f9adae84e03f2b70ca2aaa",
+  measurementId: "G-ZY9D9PLT4R"
+};
+
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Expose to window so non-module script can call
+window._fb = { auth, db, GoogleAuthProvider, FacebookAuthProvider,
+  signInWithPopup, signInAnonymously, onAuthStateChanged, signOut,
+  doc, getDoc, setDoc, updateDoc, serverTimestamp, getMessaging, getToken, onMessage, app };
+
+// Auth state listener
+onAuthStateChanged(auth, async (fbUser) => {
+  if (fbUser && window._onFbAuthReady) {
+    window._onFbAuthReady(fbUser);
+  }
+});
+</script>
+
 </head>
 <body>
 <div id="app">
@@ -608,8 +649,16 @@ function saveState() {
       rewardedCount: state.rewardedCount,
       streak: state.streak,
       read: state.read,
+      userSeed: state.userSeed,
+      reviewDone: state.reviewDone,
+      reviewLastShown: state.reviewLastShown,
+      reviewSharedTriggered: state.reviewSharedTriggered,
+      avatarDataUrl: state.avatarDataUrl,
     }));
   } catch(e) {}
+  // Sync to Firestore in background (debounced)
+  clearTimeout(window._firestoreTimer);
+  window._firestoreTimer = setTimeout(_saveFirestoreUser, 2000);
 }
 
 // ─── DARK MODE ────────────────────────────────────────────────────────────────
@@ -642,19 +691,113 @@ function toggleDark() {
 
 // ─── LOGIN / ONBOARDING ────────────────────────────────────────────────────────
 function loginWith(provider) {
-  const names = {google: 'Scherlock', facebook: 'Scherlock'};
-  state.user = {name: names[provider] || 'Visitante', provider};
-  enterApp();
+  const fb = window._fb;
+  if (!fb) { showToast('Firebase não carregou. Tente novamente.'); return; }
+  const p = provider === 'google'
+    ? new fb.GoogleAuthProvider()
+    : new fb.FacebookAuthProvider();
+  fb.signInWithPopup(fb.auth, p)
+    .then(result => _handleFbUser(result.user))
+    .catch(err => {
+      console.error('Login error:', err);
+      showToast('Erro ao entrar. Tente novamente.');
+    });
 }
 
 function guestLogin() {
-  state.user = {name: 'Visitante', provider: 'guest'};
+  const fb = window._fb;
+  if (!fb) { _fallbackGuestLogin(); return; }
+  fb.signInAnonymously(fb.auth)
+    .then(result => _handleFbUser(result.user))
+    .catch(() => _fallbackGuestLogin());
+}
+
+function _fallbackGuestLogin() {
+  state.user = {name: 'Visitante', provider: 'guest', uid: 'guest_' + Date.now()};
   enterApp();
 }
 
+async function _handleFbUser(fbUser) {
+  const name = fbUser.displayName || fbUser.email?.split('@')[0] || 'Visitante';
+  const provider = fbUser.isAnonymous ? 'guest' :
+    fbUser.providerData[0]?.providerId?.includes('google') ? 'google' : 'facebook';
+  state.user = {
+    name,
+    provider,
+    uid: fbUser.uid,
+    photoURL: fbUser.photoURL || null,
+  };
+
+  // Load user data from Firestore
+  await _loadFirestoreUser(fbUser.uid);
+  enterApp();
+
+  // Request notification permission
+  setTimeout(_requestNotificationPermission, 3000);
+}
+
+window._onFbAuthReady = async function(fbUser) {
+  // Auto-restore session if user is already logged in
+  if (!state.user?.uid && document.getElementById('s-onboard').classList.contains('active')) {
+    await _handleFbUser(fbUser);
+  }
+};
+
+async function _loadFirestoreUser(uid) {
+  const fb = window._fb;
+  if (!fb) return;
+  try {
+    const ref = fb.doc(fb.db, 'users', uid);
+    const snap = await fb.getDoc(ref);
+    if (snap.exists()) {
+      const d = snap.data();
+      if (d.isPremium !== undefined) state.isPremium = d.isPremium;
+      if (d.favorites) state.favorites = d.favorites;
+      if (d.streak) state.streak = d.streak;
+      if (d.read) state.read = d.read;
+      if (d.userSeed) state.userSeed = d.userSeed;
+      if (d.reviewDone) state.reviewDone = d.reviewDone;
+      if (d.reviewLastShown) state.reviewLastShown = d.reviewLastShown;
+      if (d.reviewSharedTriggered) state.reviewSharedTriggered = d.reviewSharedTriggered;
+      if (d.avatarDataUrl) state.avatarDataUrl = d.avatarDataUrl;
+      if (d.isDark !== undefined) state.isDark = d.isDark;
+    }
+  } catch(e) {
+    console.warn('Firestore load error:', e);
+  }
+}
+
+async function _saveFirestoreUser() {
+  const fb = window._fb;
+  if (!fb || !state.user?.uid || state.user.uid.startsWith('guest_')) return;
+  try {
+    const ref = fb.doc(fb.db, 'users', state.user.uid);
+    await fb.setDoc(ref, {
+      name: state.user.name,
+      provider: state.user.provider,
+      isPremium: state.isPremium,
+      favorites: state.favorites,
+      streak: state.streak,
+      read: state.read,
+      userSeed: state.userSeed || 1,
+      reviewDone: state.reviewDone || false,
+      reviewLastShown: state.reviewLastShown || null,
+      reviewSharedTriggered: state.reviewSharedTriggered || false,
+      isDark: state.isDark,
+      updatedAt: fb.serverTimestamp(),
+    }, { merge: true });
+  } catch(e) {
+    console.warn('Firestore save error:', e);
+  }
+}
+
 function logout() {
+  const fb = window._fb;
+  if (fb) fb.signOut(fb.auth).catch(() => {});
   state.user = null;
   state.isPremium = false;
+  state.todayPhrase = null;
+  state.favorites = [];
   saveState();
   document.getElementById('s-onboard').classList.add('active');
   document.getElementById('s-main').classList.remove('active');
@@ -1326,6 +1469,28 @@ function shareApp() {
   const text = 'Estou usando o Segundos de Sabedoria — um app com mais de 1.500 frases de sabedoria para seu dia. Recomendo!';
   navigator.share ? navigator.share({title: 'Segundos de Sabedoria', text}) : 
     navigator.clipboard.writeText(text).then(() => showToast('Link copiado!'));
+}
+
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────────
+async function _requestNotificationPermission() {
+  const fb = window._fb;
+  if (!fb || !('Notification' in window)) return;
+  if (Notification.permission === 'denied') return;
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      // FCM token — será usado para enviar notificações push no futuro
+      try {
+        const messaging = fb.getMessaging(fb.app);
+        // VAPID key seria configurada aqui em produção
+        console.log('Notificações ativadas.');
+        // Listener para mensagens em foreground
+        fb.onMessage(messaging, (payload) => {
+          showToast(payload.notification?.body || 'Nova frase do dia disponível!');
+        });
+      } catch(e) { console.warn('FCM error:', e); }
+    }
+  } catch(e) { console.warn('Notification error:', e); }
 }
 
 // ─── REVIEW ───────────────────────────────────────────────────────────────────
