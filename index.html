@@ -635,6 +635,45 @@ window.addEventListener('load', () => {
   loadState();
   initDarkMode();
   buildCatGrid();
+
+  // Hide onboarding while Firebase checks session — show spinner briefly
+  const onboard = document.getElementById('s-onboard');
+  onboard.classList.remove('active');
+
+  // Show splash/loading state
+  document.getElementById('app').style.background = 'var(--bg)';
+
+  // Wait for Firebase auth check (max 3s), then show onboarding if no session
+  let authResolved = false;
+
+  window._onFbAuthReady = async function(fbUser) {
+    authResolved = true;
+    await _handleFbUser(fbUser);
+  };
+
+  // If Firebase not loaded or no session after 3s, show onboarding
+  setTimeout(() => {
+    if (!authResolved && !state.user?.uid) {
+      onboard.classList.add('active');
+    }
+  }, 3000);
+
+  // Fallback: if state has user from localStorage, restore immediately
+  if (state.user?.uid && !state.user.uid.startsWith('guest_')) {
+    // Firebase will auto-login via onAuthStateChanged
+    // Show main screen optimistically while Firebase confirms
+    setTimeout(() => {
+      if (!authResolved) {
+        // Firebase is taking long — show onboarding
+        onboard.classList.add('active');
+      }
+    }, 4000);
+  } else if (state.user?.provider === 'guest' || !state.user) {
+    // Guest or no user — show onboarding after brief delay
+    setTimeout(() => {
+      if (!authResolved) onboard.classList.add('active');
+    }, 800);
+  }
 });
 
 function loadState() {
