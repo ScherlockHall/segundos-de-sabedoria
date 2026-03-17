@@ -1,4 +1,5 @@
 {
+  "id": "com.scherlockhall.segundosdesabedoria",
   "name": "Segundos de Sabedoria",
   "short_name": "Sabedoria",
   "description": "Uma frase de sabedoria por dia. Filosofia, estoicismo, mindfulness e muito mais.",
@@ -28,7 +29,20 @@
       "purpose": "any maskable"
     }
   ],
-  "screenshots": [],
+  "screenshots": [
+    {
+      "src": "screenshots/screenshot1.jpeg",
+      "sizes": "1080x1920",
+      "type": "image/jpeg",
+      "label": "Tela inicial com frase do dia"
+    },
+    {
+      "src": "screenshots/screenshot2.jpeg",
+      "sizes": "1080x1920",
+      "type": "image/jpeg",
+      "label": "Outra tela do app"
+    }
+  ],
   "shortcuts": [
     {
       "name": "Frase do Dia",
@@ -38,7 +52,8 @@
       "icons": [
         {
           "src": "icon-192.png",
-          "sizes": "192x192"
+          "sizes": "192x192",
+          "type": "image/png"
         }
       ]
     }
