@@ -32,7 +32,7 @@
   "screenshots": [
     {
       "src": "screenshots/screenshot1.jpeg",
-      "sizes": "1080x1920",
+      "sizes": "1079x1686",
       "type": "image/jpeg",
       "label": "Tela inicial com frase do dia"
     },
