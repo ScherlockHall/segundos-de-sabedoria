@@ -857,6 +857,8 @@ function enterApp() {
   renderMain();
   updateProfile();
   setDark(state.isDark);
+  // Inicializa AdMob se estiver dentro do app Android
+  _initAdMob();
 }
 
 // ─── PHRASE OF THE DAY ────────────────────────────────────────────────────────
@@ -1141,7 +1143,7 @@ function shareVia(platform) {
     generateShareImageFile(p, async (file) => {
       const shareData = {
         files: [file],
-        text: 'segundosdesabedoria.com',
+        text: 'https://scherlockhall.github.io/segundos-de-sabedoria/',
       };
       // Testa se o browser suporta share com files
       if (navigator.canShare(shareData)) {
@@ -1161,10 +1163,10 @@ function shareVia(platform) {
   }
 
   // Fallback URL-based para Facebook e demais
-  const textEnc = encodeURIComponent(`${p.t}\n\n— ${p.a}\n\nSegundes de Sabedoria`);
+  const textEnc = encodeURIComponent(`${p.t}\n\n— ${p.a}\n\nSegundos de Sabedoria`);
   const urls = {
-    facebook: `https://www.facebook.com/sharer/sharer.php?u=https://segundosdesabedoria.com`,
-    x: `https://x.com/intent/tweet?text=${textEnc}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=https://scherlockhall.github.io/segundos-de-sabedoria/`,
+    x: `https://x.com/intent/tweet?text=${textEnc}&url=https://scherlockhall.github.io/segundos-de-sabedoria/`,
   };
   if (urls[platform]) window.open(urls[platform], '_blank');
   maybeAskReview('share');
@@ -1472,13 +1474,55 @@ function activatePremium() {
   maybeAskReview('premium');
 }
 
-// ─── REWARDED AD ──────────────────────────────────────────────────────────────
-function showAd() {
+// ─── ADMOB ────────────────────────────────────────────────────────────────────
+const ADMOB_REWARDED_ID = 'ca-app-pub-9724427779462061/6790299545';
+
+async function _initAdMob() {
+  const AdMob = window.Capacitor?.Plugins?.AdMob;
+  if (!AdMob) return; // não está dentro do APK
+  try {
+    await AdMob.initialize({ requestTrackingAuthorization: false, initializeForTesting: false });
+    console.log('AdMob initialized');
+  } catch(e) { console.warn('AdMob init error:', e); }
+}
+
+async function showAd() {
+  const AdMob = window.Capacitor?.Plugins?.AdMob;
+
+  if (AdMob) {
+    // ── AdMob real (dentro do APK Android) ──────────────────────────────────
+    try {
+      showToast('Carregando anúncio...');
+      await AdMob.prepareRewardVideoAd({ adId: ADMOB_REWARDED_ID, isTesting: false });
+
+      // Listener de recompensa
+      const rewardListener = await AdMob.addListener('onRewardedVideoAdRewarded', () => {
+        rewardListener.remove();
+        claimReward();
+      });
+
+      // Listener de fechamento sem recompensa
+      const closeListener = await AdMob.addListener('onRewardedVideoAdClosed', () => {
+        closeListener.remove();
+      });
+
+      await AdMob.showRewardVideoAd();
+    } catch(e) {
+      console.warn('AdMob showAd error:', e);
+      showToast('Anúncio não disponível no momento.');
+    }
+  } else {
+    // ── Simulação para navegador/desenvolvimento ─────────────────────────────
+    _showSimulatedAd();
+  }
+}
+
+function _showSimulatedAd() {
   document.getElementById('ad-modal').classList.add('open');
   document.getElementById('ad-bar').style.width = '0';
   document.getElementById('ad-claim').style.display = 'none';
   document.getElementById('ad-countdown').textContent = 'Aguarde 5s...';
-  
+
   let elapsed = 0;
   const duration = 5000;
   const interval = setInterval(() => {
@@ -1501,7 +1545,6 @@ function closeAd() {
 function claimReward() {
   state.rewardedCount++;
   closeAd();
-  // Unlock current category for 24h (simulated)
   if (state.currentCat) {
     openCat(state.currentCat);
     showToast('Categoria desbloqueada por 24h.');
@@ -1594,7 +1637,8 @@ function submitReview() {
   state.reviewDone = true;
   saveState();
   document.getElementById('review-modal').classList.remove('open');
-  // Em produção: window.open('https://play.google.com/store/apps/details?id=com.segundosdesabedoria', '_blank');
+  // Em produção: substituir pelo link da Play Store
+  window.open('https://scherlockhall.github.io/segundos-de-sabedoria/', '_blank');
   showToast(_reviewStars >= 4 ? 'Obrigado pela avaliação! ⭐' : 'Obrigado pelo feedback!');
 }
 
